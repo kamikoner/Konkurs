@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- KONFIGURACJA ---
 # TUTAJ WKLEJ SWÓJ LINK Z WDROŻENIA APPS SCRIPT
-URL_API = "TU_WKLEJ_TWOJ_LINK_Z_APPS_SCRIPT"
+URL_API = "https://script.google.com/macros/s/AKfycbzHvyBE4VEIGcIQNIMTicU1Epi9WfkV8CWtN-fbMlFzJFspRhNCJvf4ljrD2GIsSWDB/exec"
 
 st.set_page_config(page_title="Konkursownik PRO Cloud", layout="wide")
 
@@ -121,3 +121,4 @@ if not df_k.empty:
                 st.caption(f"Data: {row['Data']}")
 else:
     st.info("Baza jest pusta. Dodaj konkurs w panelu bocznym.")
+
