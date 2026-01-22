@@ -31,27 +31,38 @@ st.title("🏆 Ekspercki Manager Konkursowy")
 with st.sidebar:
     st.header("📥 Nowy Konkurs")
     json_input = st.text_area("Wklej JSON z czatu Gemini:", height=200)
-    if st.button("Dodaj Konkurs"):
-        try:
-            d = json.loads(json_input)
-            payload = {
-                "type": "konkursy",
-                "action": "add",
-                "id": int(datetime.now().strftime("%Y%m%d%H%M%S")),
-                "Konkurs": d['Konkurs'],
-                "Koniec": d['Koniec'],
-                "Zadanie": d['Pelne_Zadanie'],
-                "Limit": d['Limit'],
-                "Kryteria": d.get('Kryteria', ''),
-                "Nr_Paragonu_Info": d.get('Nr_Paragonu_Info', ''),
-                "Paragon": d['Paragon']
-            }
-            wyslij_do_bazy(payload)
-            st.success("Dodano do Arkusza!")
-            st.rerun()
-        except:
-            st.error("Błąd formatu JSON!")
+   if st.button("Dodaj Konkurs"):
+        if json_input:
+            try:
+                # AUTOMATYCZNE CZYSZCZENIE TEKSTU
+                clean_json = json_input.strip()
+                if clean_json.startswith("```json"):
+                    clean_json = clean_json.replace("```json", "", 1)
+                if clean_json.endswith("```"):
+                    clean_json = clean_json.rsplit("```", 1)[0]
+                clean_json = clean_json.strip()
 
+                d = json.loads(clean_json)
+                
+                payload = {
+                    "type": "konkursy",
+                    "action": "add",
+                    "id": int(datetime.now().strftime("%Y%m%d%H%M%S")),
+                    "Konkurs": d.get('Konkurs', 'Bez nazwy'),
+                    "Koniec": d.get('Koniec', ''),
+                    "Zadanie": d.get('Pelne_Zadanie', ''),
+                    "Limit": d.get('Limit', ''),
+                    "Kryteria": d.get('Kryteria', ''),
+                    "Nr_Paragonu_Info": d.get('Nr_Paragonu_Info', ''),
+                    "Paragon": d.get('Paragon', 'Nie')
+                }
+                wyslij_do_bazy(payload)
+                st.success("Dodano do Arkusza!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Błąd formatu JSON! Upewnij się, że wklejasz poprawny kod. Szczegóły: {e}")
+        else:
+            st.warning("Najpierw wklej dane!")
 # POBIERANIE DANYCH
 df_k, df_z = pobierz_wszystko()
 
@@ -121,4 +132,5 @@ if not df_k.empty:
                 st.caption(f"Data: {row['Data']}")
 else:
     st.info("Baza jest pusta. Dodaj konkurs w panelu bocznym.")
+
 
