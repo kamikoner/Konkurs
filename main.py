@@ -1,78 +1,123 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import requests
+import json
 import pandas as pd
 from datetime import datetime
-import json
 
-st.set_page_config(page_title="Konkursownik Cloud", layout="wide")
+# --- KONFIGURACJA ---
+# TUTAJ WKLEJ SWÓJ LINK Z WDROŻENIA APPS SCRIPT
+URL_API = "TU_WKLEJ_TWOJ_LINK_Z_APPS_SCRIPT"
 
-# --- POŁĄCZENIE Z ARKUSZAMI GOOGLE ---
-# W chmurze skonfigurujemy to w sekcji "Secrets"
-conn = st.connection("gsheets", type=GSheetsConnection)
+st.set_page_config(page_title="Konkursownik PRO Cloud", layout="wide")
 
-def wczytaj_konkursy():
+# --- FUNKCJE KOMUNIKACJI ---
+def pobierz_wszystko():
     try:
-        return conn.read(worksheet="konkursy")
+        r = requests.get(URL_API)
+        dane = r.json()
+        df_k = pd.DataFrame(dane['konkursy'][1:], columns=dane['konkursy'][0]) if len(dane['konkursy']) > 1 else pd.DataFrame()
+        df_z = pd.DataFrame(dane['zgloszenia'][1:], columns=dane['zgloszenia'][0]) if len(dane['zgloszenia']) > 1 else pd.DataFrame()
+        return df_k, df_z
     except:
-        return pd.DataFrame(columns=["ID", "Konkurs", "Koniec", "Zadanie", "Limit", "Kryteria", "Nr_Paragonu_Info", "Paragon"])
+        return pd.DataFrame(), pd.DataFrame()
 
-def wczytaj_zgloszenia():
-    try:
-        return conn.read(worksheet="zgloszenia")
-    except:
-        return pd.DataFrame(columns=["Konkurs_ID", "Nr_Paragonu", "Tekst", "Data"])
+def wyslij_do_bazy(payload):
+    requests.post(URL_API, data=json.dumps(payload))
 
 # --- INTERFEJS ---
-st.title("🏆 Mobilny Manager Konkursowy")
+st.title("🏆 Ekspercki Manager Konkursowy")
 
-# PASEK BOCZNY - IMPORT
+# BOCZNY PANEL - IMPORT JSON OD GEMINI
 with st.sidebar:
     st.header("📥 Nowy Konkurs")
-    import_json = st.text_area("Wklej JSON od Gemini:", height=150)
+    json_input = st.text_area("Wklej JSON z czatu Gemini:", height=200)
     if st.button("Dodaj Konkurs"):
         try:
-            d = json.loads(import_json)
-            df_k = wczytaj_konkursy()
-            nowe_id = int(datetime.now().strftime("%Y%m%d%H%M%S"))
-            nowy_row = pd.DataFrame([{
-                "ID": nowe_id, "Konkurs": d['Konkurs'], "Koniec": d['Koniec'],
-                "Zadanie": d['Pelne_Zadanie'], "Limit": d['Limit'],
-                "Kryteria": d.get('Kryteria', ''), "Nr_Paragonu_Info": d.get('Nr_Paragonu_Info', ''),
+            d = json.loads(json_input)
+            payload = {
+                "type": "konkursy",
+                "action": "add",
+                "id": int(datetime.now().strftime("%Y%m%d%H%M%S")),
+                "Konkurs": d['Konkurs'],
+                "Koniec": d['Koniec'],
+                "Zadanie": d['Pelne_Zadanie'],
+                "Limit": d['Limit'],
+                "Kryteria": d.get('Kryteria', ''),
+                "Nr_Paragonu_Info": d.get('Nr_Paragonu_Info', ''),
                 "Paragon": d['Paragon']
-            }])
-            df_final = pd.concat([df_k, nowy_row], ignore_index=True)
-            conn.update(worksheet="konkursy", data=df_final)
-            st.success("Dodano do chmury!")
+            }
+            wyslij_do_bazy(payload)
+            st.success("Dodano do Arkusza!")
             st.rerun()
-        except Exception as e: st.error(f"Błąd: {e}")
+        except:
+            st.error("Błąd formatu JSON!")
 
-# PANEL GŁÓWNY
-df_k = wczytaj_konkursy()
-df_z = wczytaj_zgloszenia()
+# POBIERANIE DANYCH
+df_k, df_z = pobierz_wszystko()
 
 if not df_k.empty:
-    wybor = st.selectbox("Wybierz konkurs:", df_k['Konkurs'].tolist())
-    k_info = df_k[df_k['Konkurs'] == wybor].iloc[0]
+    # WYBÓR KONKURSU
+    col_sel, col_del = st.columns([3, 1])
+    with col_sel:
+        lista_k = df_k['Konkurs'].tolist()
+        wybor = st.selectbox("Zarządzaj konkursem:", lista_k)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info(f"📅 Koniec: {k_info['Koniec']}\n\n🧾 Nr paragonu: {k_info['Nr_Paragonu_Info']}")
-    with col2:
-        st.warning(f"⚖️ Kryteria: {k_info['Kryteria']}")
+    k_info = df_k[df_k['Konkurs'] == wybor].iloc[0]
+    k_id = k_info['ID']
 
-    st.divider()
-    # Dodawanie zgłoszenia
-    with st.expander("➕ Dodaj zgłoszenie / paragon"):
-        nr_p = st.text_input("Nr paragonu")
-        tekst = st.text_area("Twoja praca")
-        if st.button("Zapisz w Arkuszu"):
-            nowe_z = pd.DataFrame([{"Konkurs_ID": k_info['ID'], "Nr_Paragonu": nr_p, "Tekst": tekst, "Data": datetime.now().strftime("%Y-%m-%d %H:%M")}])
-            df_z_final = pd.concat([df_z, nowe_z], ignore_index=True)
-            conn.update(worksheet="zgloszenia", data=df_z_final)
-            st.success("Zapisano!")
+    with col_del:
+        st.write("")
+        if st.button("🗑️ Usuń konkurs"):
+            wyslij_do_bazy({"type": "konkursy", "action": "delete", "id": k_id})
+            wyslij_do_bazy({"type": "zgloszenia", "action": "delete", "konkurs_id": k_id})
+            st.warning("Usunięto!")
             st.rerun()
 
-    # Wyświetlanie zgłoszeń
-    st.subheader("Twoje paragony")
-    moje_zgl = df_z[df_z['Konkurs_ID'] == k_info['ID']]
-    st.table(moje_zgl[["Nr_Paragonu", "Tekst", "Data"]])
+    st.divider()
+
+    # WYŚWIETLANIE SZCZEGÓŁÓW
+    c1, c2 = st.columns(2)
+    with c1:
+        st.info(f"📅 **Koniec:** {k_info['Koniec']}\n\n⚖️ **Kryteria:** {k_info['Kryteria']}")
+    with c2:
+        st.success(f"🧾 **Nr paragonu:** {k_info['Nr_Paragonu_Info']}\n\n📏 **Limit:** {k_info['Limit']}")
+    
+    with st.expander("📝 Zobacz pełne zadanie"):
+        st.write(k_info['Zadanie'])
+
+    # SEKCJA ZGŁOSZEŃ (WIELE PARAGONÓW)
+    st.divider()
+    st.subheader(f"🎫 Twoje zgłoszenia")
+
+    with st.expander("➕ Dodaj nowe zgłoszenie do tego konkursu"):
+        nr_p = st.text_input("Numer paragonu")
+        txt_zgl = st.text_area("Twoja praca konkursowa", height=150)
+        
+        # Licznik znaków
+        limit_val = str(k_info['Limit'])
+        max_ch = int(limit_val) if limit_val.isdigit() else 2000
+        st.caption(f"Znaki: {len(txt_zgl)} / {max_ch}")
+        
+        if st.button("Zapisz zgłoszenie"):
+            payload_z = {
+                "type": "zgloszenia",
+                "action": "add",
+                "konkurs_id": k_id,
+                "Nr_Paragonu": nr_p,
+                "Tekst": txt_zgl,
+                "Data": datetime.now().strftime("%Y-%m-%d %H:%M")
+            }
+            wyslij_do_bazy(payload_z)
+            st.success("Zgłoszenie zapisane!")
+            st.rerun()
+
+    # LISTA ZAPISANYCH ZGŁOSZEŃ
+    if not df_z.empty:
+        moje_z = df_z[df_z['Konkurs_ID'].astype(str) == str(k_id)]
+        for _, row in moje_z.iterrows():
+            with st.container(border=True):
+                st.write(f"🧾 **Paragon:** {row['Nr_Paragonu']}")
+                st.write(f"💬 {row['Tekst']}")
+                st.caption(f"Data: {row['Data']}")
+else:
+    st.info("Baza jest pusta. Dodaj konkurs w panelu bocznym.")
