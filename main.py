@@ -5,45 +5,51 @@ import pandas as pd
 from datetime import datetime
 
 # --- KONFIGURACJA ---
-# TUTAJ WKLEJ SWÓJ LINK Z WDROŻENIA APPS SCRIPT
-URL_API = "https://script.google.com/macros/s/AKfycbzHvyBE4VEIGcIQNIMTicU1Epi9WfkV8CWtN-fbMlFzJFspRhNCJvf4ljrD2GIsSWDB/exec"
+# TUTAJ WKLEJ SWÓJ LINK Z WDROŻENIA APPS SCRIPT (Web App URL)
+URL_API = "TUTAJ_WKLEJ_SWOJ_LINK_Z_APPS_SCRIPT"
 
-st.set_page_config(page_title="Konkursownik PRO Cloud", layout="wide")
+st.set_page_config(page_title="Konkursownik PRO Cloud", layout="wide", page_icon="🏆")
 
-# --- FUNKCJE KOMUNIKACJI ---
+# --- FUNKCJE KOMUNIKACJI Z ARKUSZEM ---
 def pobierz_wszystko():
     try:
         r = requests.get(URL_API)
         dane = r.json()
+        # Tworzenie DataFrame z danych (pierwszy wiersz to nagłówki)
         df_k = pd.DataFrame(dane['konkursy'][1:], columns=dane['konkursy'][0]) if len(dane['konkursy']) > 1 else pd.DataFrame()
         df_z = pd.DataFrame(dane['zgloszenia'][1:], columns=dane['zgloszenia'][0]) if len(dane['zgloszenia']) > 1 else pd.DataFrame()
         return df_k, df_z
-    except:
+    except Exception as e:
         return pd.DataFrame(), pd.DataFrame()
 
 def wyslij_do_bazy(payload):
-    requests.post(URL_API, data=json.dumps(payload))
+    try:
+        requests.post(URL_API, data=json.dumps(payload))
+    except Exception as e:
+        st.error(f"Błąd wysyłania: {e}")
 
-# --- INTERFEJS ---
+# --- INTERFEJS UŻYTKOWNIKA ---
 st.title("🏆 Ekspercki Manager Konkursowy")
+st.caption("Zsynchronizowano z Twoim Arkuszem Google")
 
-# BOCZNY PANEL - IMPORT JSON OD GEMINI
+# BOCZNY PANEL - IMPORT NOWEGO KONKURSU
 with st.sidebar:
     st.header("📥 Nowy Konkurs")
-    json_input = st.text_area("Wklej JSON z czatu Gemini:", height=200)
-   if st.button("Dodaj Konkurs"):
+    st.write("Wklej tutaj analizę od Gemini:")
+    json_input = st.text_area("JSON Input", height=200, label_visibility="collapsed")
+    
+    if st.button("🚀 Dodaj Konkurs do Bazy"):
         if json_input:
             try:
-                # AUTOMATYCZNE CZYSZCZENIE TEKSTU
+                # CZYSZCZENIE JSON (usuwanie znaczników ```json i innych śmieci)
                 clean_json = json_input.strip()
-                if clean_json.startswith("```json"):
-                    clean_json = clean_json.replace("```json", "", 1)
-                if clean_json.endswith("```"):
-                    clean_json = clean_json.rsplit("```", 1)[0]
+                if clean_json.startswith("```"):
+                    clean_json = clean_json.replace("```json", "", 1).replace("```", "", 1)
                 clean_json = clean_json.strip()
 
                 d = json.loads(clean_json)
                 
+                # Budowanie paczki danych
                 payload = {
                     "type": "konkursy",
                     "action": "add",
@@ -51,86 +57,108 @@ with st.sidebar:
                     "Konkurs": d.get('Konkurs', 'Bez nazwy'),
                     "Koniec": d.get('Koniec', ''),
                     "Zadanie": d.get('Pelne_Zadanie', ''),
-                    "Limit": d.get('Limit', ''),
-                    "Kryteria": d.get('Kryteria', ''),
-                    "Nr_Paragonu_Info": d.get('Nr_Paragonu_Info', ''),
+                    "Limit": d.get('Limit', 'Brak'),
+                    "Kryteria": d.get('Kryteria', 'Brak danych'),
+                    "Nr_Paragonu_Info": d.get('Nr_Paragonu_Info', 'Nieokreślono'),
                     "Paragon": d.get('Paragon', 'Nie')
                 }
                 wyslij_do_bazy(payload)
-                st.success("Dodano do Arkusza!")
+                st.success("Konkurs dodany pomyślnie!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Błąd formatu JSON! Upewnij się, że wklejasz poprawny kod. Szczegóły: {e}")
+                st.error(f"Błąd formatu JSON! Sprawdź czy skopiowałeś wszystko. ({e})")
         else:
-            st.warning("Najpierw wklej dane!")
-# POBIERANIE DANYCH
+            st.warning("Pole jest puste!")
+
+# POBIERANIE DANYCH Z CHMURY
 df_k, df_z = pobierz_wszystko()
 
 if not df_k.empty:
-    # WYBÓR KONKURSU
+    # WYBÓR KONKURSU Z LISTY
     col_sel, col_del = st.columns([3, 1])
     with col_sel:
         lista_k = df_k['Konkurs'].tolist()
-        wybor = st.selectbox("Zarządzaj konkursem:", lista_k)
+        wybor = st.selectbox("Wybierz konkurs, którym chcesz zarządzać:", lista_k)
     
+    # Pobranie szczegółów wybranego konkursu
     k_info = df_k[df_k['Konkurs'] == wybor].iloc[0]
     k_id = k_info['ID']
 
     with col_del:
-        st.write("")
-        if st.button("🗑️ Usuń konkurs"):
+        st.write("") # Odstęp dla wyrównania
+        if st.button("🗑️ Usuń ten konkurs", use_container_width=True):
             wyslij_do_bazy({"type": "konkursy", "action": "delete", "id": k_id})
             wyslij_do_bazy({"type": "zgloszenia", "action": "delete", "konkurs_id": k_id})
-            st.warning("Usunięto!")
+            st.warning(f"Usunięto: {wybor}")
             st.rerun()
 
     st.divider()
 
-    # WYŚWIETLANIE SZCZEGÓŁÓW
-    c1, c2 = st.columns(2)
+    # WYŚWIETLANIE SZCZEGÓŁÓW (DATY, KRYTERIA, PARAGON)
+    c1, c2, c3 = st.columns(3)
     with c1:
-        st.info(f"📅 **Koniec:** {k_info['Koniec']}\n\n⚖️ **Kryteria:** {k_info['Kryteria']}")
+        st.metric("📅 Data końca", k_info['Koniec'])
     with c2:
-        st.success(f"🧾 **Nr paragonu:** {k_info['Nr_Paragonu_Info']}\n\n📏 **Limit:** {k_info['Limit']}")
+        st.metric("📏 Limit znaków", k_info['Limit'])
+    with c3:
+        st.metric("🧾 Paragon", k_info['Paragon'])
+
+    col_info_1, col_info_2 = st.columns(2)
+    with col_info_1:
+        st.warning(f"⚖️ **Co ocenia Jury:**\n\n{k_info['Kryteria']}")
+    with col_info_2:
+        st.success(f"🔍 **Instrukcja numeru paragonu:**\n\n{k_info['Nr_Paragonu_Info']}")
     
-    with st.expander("📝 Zobacz pełne zadanie"):
+    with st.expander("📖 Zobacz pełną treść zadania z regulaminu"):
         st.write(k_info['Zadanie'])
 
-    # SEKCJA ZGŁOSZEŃ (WIELE PARAGONÓW)
+    # SEKCJA ZGŁOSZEŃ (WIELE PARAGONÓW POD JEDEN KONKURS)
     st.divider()
-    st.subheader(f"🎫 Twoje zgłoszenia")
+    st.subheader(f"🎫 Twoje zgłoszenia do konkursu: {wybor}")
 
-    with st.expander("➕ Dodaj nowe zgłoszenie do tego konkursu"):
-        nr_p = st.text_input("Numer paragonu")
+    with st.expander("➕ Dodaj nowe zgłoszenie (nowy paragon)", expanded=False):
+        nr_p = st.text_input("Numer paragonu (zgodnie z instrukcją powyżej)")
         txt_zgl = st.text_area("Twoja praca konkursowa", height=150)
         
-        # Licznik znaków
-        limit_val = str(k_info['Limit'])
-        max_ch = int(limit_val) if limit_val.isdigit() else 2000
-        st.caption(f"Znaki: {len(txt_zgl)} / {max_ch}")
+        # Logika licznika znaków
+        limit_raw = str(k_info['Limit'])
+        limit_digits = "".join(filter(str.isdigit, limit_raw))
+        max_ch = int(limit_digits) if limit_digits else 2000
         
-        if st.button("Zapisz zgłoszenie"):
-            payload_z = {
-                "type": "zgloszenia",
-                "action": "add",
-                "konkurs_id": k_id,
-                "Nr_Paragonu": nr_p,
-                "Tekst": txt_zgl,
-                "Data": datetime.now().strftime("%Y-%m-%d %H:%M")
-            }
-            wyslij_do_bazy(payload_z)
-            st.success("Zgłoszenie zapisane!")
-            st.rerun()
+        dlugosc = len(txt_zgl)
+        if dlugosc > max_ch:
+            st.error(f"Liczba znaków: {dlugosc} / {max_ch} (PRZEKROCZONO!)")
+        else:
+            st.caption(f"Liczba znaków: {dlugosc} / {max_ch}")
+        
+        if st.button("💾 Zapisz zgłoszenie"):
+            if nr_p and txt_zgl:
+                payload_z = {
+                    "type": "zgloszenia",
+                    "action": "add",
+                    "konkurs_id": k_id,
+                    "Nr_Paragonu": nr_p,
+                    "Tekst": txt_zgl,
+                    "Data": datetime.now().strftime("%Y-%m-%d %H:%M")
+                }
+                wyslij_do_bazy(payload_z)
+                st.success("Zgłoszenie zapisane w chmurze!")
+                st.rerun()
+            else:
+                st.warning("Wypełnij numer paragonu i tekst pracy.")
 
-    # LISTA ZAPISANYCH ZGŁOSZEŃ
+    # LISTA ZAPISANYCH PARAGONÓW I PRAC
     if not df_z.empty:
+        # Filtrowanie zgłoszeń tylko dla tego konkursu (porównujemy jako stringi dla bezpieczeństwa)
         moje_z = df_z[df_z['Konkurs_ID'].astype(str) == str(k_id)]
-        for _, row in moje_z.iterrows():
-            with st.container(border=True):
-                st.write(f"🧾 **Paragon:** {row['Nr_Paragonu']}")
-                st.write(f"💬 {row['Tekst']}")
-                st.caption(f"Data: {row['Data']}")
+        
+        if not moje_z.empty:
+            for _, row in moje_z.iterrows():
+                with st.container(border=True):
+                    st.write(f"🧾 **Paragon:** {row['Nr_Paragonu']}")
+                    st.write(f"💬 {row['Tekst']}")
+                    st.caption(f"Dodano: {row['Data']}")
+        else:
+            st.info("Nie dodałeś jeszcze żadnego paragonu do tego konkursu.")
 else:
-    st.info("Baza jest pusta. Dodaj konkurs w panelu bocznym.")
-
-
+    st.info("Twoja baza jest pusta. Wklej analizę regulaminu w panelu bocznym, aby zacząć.")
