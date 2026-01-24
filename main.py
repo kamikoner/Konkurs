@@ -145,8 +145,8 @@ if not df_k.empty:
                 payload_z = {
                     "type": "zgloszenia",
                     "action": "add",
-                    "konkurs_id": k_id,
-                    "Nr_Paragonu": nr_p,
+                    "konkurs_id": int(k_id), # Wymuszamy zwykły int
+                    "Nr_Paragonu": str(nr_p), # Wymuszamy tekst
                     "Tekst": txt_zgl,
                     "Data": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
@@ -169,3 +169,4 @@ if not df_k.empty:
             st.info("Brak zgłoszeń dla tego konkursu.")
 else:
     st.info("Baza konkursów jest pusta. Użyj panelu bocznego, aby dodać pierwszy konkurs.")
+
