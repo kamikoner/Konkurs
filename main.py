@@ -10,6 +10,10 @@ URL_API = "https://script.google.com/macros/s/AKfycbxsIurMBjUxGPDn7xSYmCSAF3qWCh
 
 st.set_page_config(page_title="Konkursownik", layout="wide", page_icon="🏆")
 
+# Inicjalizacja wersji formularza (do czyszczenia pól)
+if "form_version" not in st.session_state:
+    st.session_state.form_version = 0
+
 # --- FUNKCJE POMOCNICZE ---
 def sformatuj_date(data_str):
     if not data_str or data_str == 'Brak': return "Brak"
@@ -48,7 +52,7 @@ def wyslij_i_odswiez(payload):
 st.title("🏆 Konkursownik Mateusza")
 
 with st.sidebar:
-    if st.button("🔄 Synchronizuj", use_container_width=True):
+    if st.button("🔄 Synchronizuj dane", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
     st.divider()
@@ -87,23 +91,37 @@ if not df_k.empty:
 
     st.info(f"📣 **Wyniki:** {sformatuj_date(k_info.get('Data_Wynikow', 'Brak'))}")
 
-    # --- FORMULARZ DODAWANIA (BEZ BŁĘDÓW) ---
-    st.subheader("🎫 Dodaj zgłoszenie")
-    with st.form("nowe_zgloszenie_form", clear_on_submit=True):
-        n_p = st.text_input("Numer paragonu")
-        txt = st.text_area("Twoja praca")
-        st.caption(f"Limit: {k_info['Limit']}")
-        
-        if st.form_submit_button("💾 Zapisz w chmurze"):
-            if n_p and txt:
-                p_z = {"type": "zgloszenia", "action": "add", "id": int(datetime.now().strftime("%Y%m%d%H%M%S")), 
-                       "konkurs_id": k_id, "Nr_Paragonu": n_p, "Tekst": txt, "Data": datetime.now().strftime("%Y-%m-%d %H:%M")}
-                if wyslij_i_odswiez(p_z):
-                    st.rerun()
-            else:
-                st.warning("Uzupełnij oba pola!")
+    # --- NOWA SEKCJA DODAWANIA Z LICZNIKIEM ---
+    st.subheader("🎫 Dodaj nowe zgłoszenie")
+    
+    # Wyciągamy cyfry z limitu (np. "300 znaków" -> 300)
+    limit_str = str(k_info['Limit'])
+    limit_digits = "".join(filter(str.isdigit, limit_str))
+    max_ch = int(limit_digits) if limit_digits else 2000
 
-    # --- LISTA I WYSZUKIWARKA ---
+    # Pola wejściowe z dynamicznym kluczem (do czyszczenia)
+    n_p = st.text_input("Numer paragonu", key=f"np_{st.session_state.form_version}")
+    txt = st.text_area("Twoja praca", height=150, key=f"txt_{st.session_state.form_version}")
+    
+    # LICZNIK ZNAKÓW (LIVE)
+    dlugosc = len(txt)
+    if dlugosc > max_ch:
+        st.error(f"📏 Znaki: {dlugosc} / {max_ch} (PRZEKROCZONO!)")
+    else:
+        st.success(f"📏 Znaki: {dlugosc} / {max_ch}")
+
+    if st.button("💾 Zapisz zgłoszenie w chmurze", use_container_width=True):
+        if n_p and txt:
+            p_z = {"type": "zgloszenia", "action": "add", "id": int(datetime.now().strftime("%Y%m%d%H%M%S")), 
+                   "konkurs_id": k_id, "Nr_Paragonu": n_p, "Tekst": txt, "Data": datetime.now().strftime("%Y-%m-%d %H:%M")}
+            if wyslij_i_odswiez(p_z):
+                # Zmieniamy wersję klucza -> pola stają się puste
+                st.session_state.form_version += 1
+                st.rerun()
+        else:
+            st.warning("Uzupełnij oba pola!")
+
+    # --- LISTA ZGŁOSZEŃ ---
     st.divider()
     szukaj = st.text_input("🔍 Szukaj paragonu:")
 
@@ -129,7 +147,7 @@ if not df_k.empty:
                 if c2.button("🗑️", key=f"d_{z_id}"): 
                     if wyslij_i_odswiez({"type": "zgloszenia", "action": "delete", "id": z_id}): st.rerun()
                 
-                label = "🥈 Odznacz" if is_winner else "🏆 WYGRANA!"
+                label = "🥈 Odznacz wygraną" if is_winner else "🏆 ZAZNACZ WYGRANĄ!"
                 st_val = "Nie" if is_winner else "Tak"
                 if c3.button(label, key=f"w_{z_id}"):
                     if wyslij_i_odswiez({"type": "zgloszenia", "action": "update_status", "id": z_id, "status": st_val}):
@@ -137,14 +155,15 @@ if not df_k.empty:
 
                 if st.session_state.get(f"ed_{z_id}", False):
                     with st.form(f"edit_{z_id}"):
-                        nn = st.text_input("Nr", value=row['Nr_Paragonu'])
-                        nt = st.text_area("Tekst", value=row['Tekst'])
-                        if st.form_submit_button("Zapisz"):
+                        nn = st.text_input("Nr paragonu", value=row['Nr_Paragonu'])
+                        nt = st.text_area("Tekst pracy", value=row['Tekst'])
+                        c_ed1, c_ed2 = st.columns(2)
+                        if c_ed1.form_submit_button("Zapisz zmiany"):
                             if wyslij_i_odswiez({"type": "zgloszenia", "action": "update", "id": z_id, "Nr_Paragonu": nn, "Tekst": nt}):
                                 st.session_state[f"ed_{z_id}"] = False
                                 st.rerun()
-                        if st.form_submit_button("Anuluj"):
+                        if c_ed2.form_submit_button("Anuluj"):
                             st.session_state[f"ed_{z_id}"] = False
                             st.rerun()
 else:
-    st.info("Baza pusta.")
+    st.info("Baza konkursów jest pusta.")
