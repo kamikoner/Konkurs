@@ -6,9 +6,14 @@ from datetime import datetime
 import re
 
 # --- KONFIGURACJA ---
+# TUTAJ WKLEJ SWÓJ LINK Z WDROŻENIA APPS SCRIPT
 URL_API = "https://script.google.com/macros/s/AKfycbwWKkt_CCd8dIU9EOwonm7wr62mBd8y1bwGfLjlHVZrkBn2sZbF5GewnxCfoDHJZiP9/exec"
 
-st.set_page_config(page_title="Konkursownik v8", layout="wide", page_icon="🏆")
+st.set_page_config(page_title="Konkursownik v9", layout="wide", page_icon="🏆")
+
+# Inicjalizacja kluczy dla formularza (do czyszczenia pól)
+if "form_nr_p" not in st.session_state: st.session_state.form_nr_p = ""
+if "form_tekst" not in st.session_state: st.session_state.form_tekst = ""
 
 def pobierz_wszystko():
     try:
@@ -24,7 +29,7 @@ def wyslij(payload):
     except: return False
 
 # --- INTERFEJS ---
-st.title("🏆 Ekspercki Manager Konkursowy v8")
+st.title("🏆 Konkursownik Mateusza")
 
 with st.sidebar:
     st.header("📥 Import z Gemini")
@@ -54,7 +59,7 @@ if not df_k.empty:
 
     st.divider()
 
-    # --- PRZYWRÓCONE SZCZEGÓŁY KONKURSU ---
+    # --- SZCZEGÓŁY KONKURSU ---
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("📅 Koniec", k_info['Koniec'])
     m2.metric("🏢 Agencja", k_info.get('Agencja', 'Brak'))
@@ -70,18 +75,43 @@ if not df_k.empty:
     with st.expander("📝 Pełna treść zadania"):
         st.write(k_info['Zadanie'])
 
-    # --- ZGŁOSZENIA ---
+    # --- DODAWANIE ZGŁOSZENIA ---
     st.divider()
     st.subheader("🎫 Zarządzanie zgłoszeniami")
     
-    with st.expander("➕ Dodaj nowe zgłoszenie"):
-        n_p = st.text_input("Nr paragonu")
-        txt = st.text_area("Praca")
-        if st.button("Zapisz w chmurze"):
-            if wyslij({"type": "zgloszenia", "action": "add", "id": int(datetime.now().strftime("%Y%m%d%H%M%S")), 
-                       "konkurs_id": k_id, "Nr_Paragonu": n_p, "Tekst": txt, "Data": datetime.now().strftime("%Y-%m-%d %H:%M")}):
-                st.rerun()
+    with st.expander("➕ Dodaj nowe zgłoszenie", expanded=True):
+        # Pola formularza połączone z session_state
+        nr_p_input = st.text_input("Numer paragonu", key="input_nr_p")
+        tekst_input = st.text_area("Twoja praca konkursowa", height=150, key="input_tekst")
+        
+        # LICZNIK ZNAKÓW
+        limit_str = str(k_info['Limit'])
+        limit_digits = "".join(filter(str.isdigit, limit_str))
+        max_ch = int(limit_digits) if limit_digits else 2000
+        
+        akt_dlugosc = len(tekst_input)
+        if akt_dlugosc > max_ch:
+            st.error(f"📏 Liczba znaków: {akt_dlugosc} / {max_ch} (PRZEKROCZONO!)")
+        else:
+            st.success(f"📏 Liczba znaków: {akt_dlugosc} / {max_ch}")
 
+        if st.button("💾 Zapisz w chmurze"):
+            if nr_p_input and tekst_input:
+                payload_z = {
+                    "type": "zgloszenia", "action": "add", 
+                    "id": int(datetime.now().strftime("%Y%m%d%H%M%S")), 
+                    "konkurs_id": k_id, "Nr_Paragonu": nr_p_input, 
+                    "Tekst": tekst_input, "Data": datetime.now().strftime("%Y-%m-%d %H:%M")
+                }
+                if wyslij(payload_z):
+                    # CZYSZCZENIE PÓL PO ZAPISIE
+                    st.session_state.input_nr_p = ""
+                    st.session_state.input_tekst = ""
+                    st.rerun()
+            else:
+                st.warning("Uzupełnij oba pola przed zapisem.")
+
+    # --- WYSZUKIWARKA I LISTA ---
     szukaj = st.text_input("🔍 Wyszukiwarka paragonów:", placeholder="Wpisz numer...")
 
     if not df_z.empty:
@@ -92,18 +122,17 @@ if not df_k.empty:
         for _, row in moje_z.iterrows():
             with st.container(border=True):
                 z_id = row['ID']
-                col_txt, col_btns = st.columns([4, 1])
+                c_txt, c_btns = st.columns([4, 1])
                 
-                with col_txt:
+                with c_txt:
                     st.write(f"🧾 **Paragon:** {row['Nr_Paragonu']}")
                     st.write(f"💬 {row['Tekst']}")
-                    st.caption(f"Data dodania: {row['Data']}")
+                    st.caption(f"Data: {row['Data']}")
                 
-                with col_btns:
+                with c_btns:
                     if st.button("✏️ Edytuj", key=f"ed_{z_id}", use_container_width=True):
                         st.session_state[f"edit_mode_{z_id}"] = True
-                    
-                    if st.button("🗑️ Usuń", key=f"del_z_{z_id}", use_container_width=True):
+                    if st.button("🗑️ Usuń", key=f"del_{z_id}", use_container_width=True):
                         wyslij({"type": "zgloszenia", "action": "delete", "id": z_id})
                         st.rerun()
 
@@ -112,6 +141,9 @@ if not df_k.empty:
                     with st.form(key=f"form_{z_id}"):
                         nowy_nr = st.text_input("Popraw nr", value=row['Nr_Paragonu'])
                         nowy_txt = st.text_area("Popraw tekst", value=row['Tekst'])
+                        # Licznik w edycji
+                        st.caption(f"Znaki: {len(nowy_txt)} / {max_ch}")
+                        
                         c1, c2 = st.columns(2)
                         if c1.form_submit_button("Zapisz"):
                             wyslij({"type": "zgloszenia", "action": "update", "id": z_id, "Nr_Paragonu": nowy_nr, "Tekst": nowy_txt})
